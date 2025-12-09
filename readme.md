@@ -32,14 +32,14 @@ graph TB
     Generate --> End([Final Answer<br/>with Source Citations])
     
     %% Stiller
-    style Start fill:#4A90E2,stroke:#333,stroke-width:2px,color:#fff
-    style Retrieve fill:#E3F2FD,stroke:#4A90E2,stroke-width:2px
-    style Rerank fill:#BBDEFB,stroke:#4A90E2,stroke-width:2px
-    style Grade fill:#FFD54F,stroke:#FBC02D,stroke-width:2px
-    style Decision fill:#FFFFFF,stroke:#333,stroke-width:4px
-    style WebSearch fill:#FF7043,stroke:#E64A19,stroke-width:2px,color:#fff
-    style Generate fill:#66BB6A,stroke:#2E7D32,stroke-width:2px,color:#fff
-    style End fill:#2E7D32,stroke:#1B5E20,stroke-width:2px,color:#fff
+    style Start fill:#4A90E2,stroke:#333,stroke-width:2px,color:#333
+    style Retrieve fill:#E3F2FD,stroke:#4A90E2,stroke-width:2px,color:#333
+    style Rerank fill:#BBDEFB,stroke:#4A90E2,stroke-width:2px,color:#333
+    style Grade fill:#FFD54F,stroke:#FBC02D,stroke-width:2px,color:#333
+    style Decision fill:#FFFFFF,stroke:#333,stroke-width:4px,color:#333
+    style WebSearch fill:#FF7043,stroke:#E64A19,stroke-width:2px,color:#333
+    style Generate fill:#66BB6A,stroke:#2E7D32,stroke-width:2px,color:#333
+    style End fill:#2E7D32,stroke:#1B5E20,stroke-width:2px,color:#333
 ```
 
 ## 🔧 System Components
