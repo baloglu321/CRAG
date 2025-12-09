@@ -18,7 +18,6 @@ A sophisticated RAG (Retrieval-Augmented Generation) system that implements Corr
 
 ## 📊 Architecture
 
-```mermaid
 graph TB
     Start([User Query]) --> Retrieve[Retrieve Documents<br/>Hybrid: BM25 + Vector<br/>Top 20 Candidates]
     Retrieve --> Rerank[Cross-Encoder Reranking<br/>cross-encoder/ms-marco-TinyBERT<br/>Top 5 from Top 20]
@@ -32,13 +31,15 @@ graph TB
     WebSearch --> Generate
     Generate --> End([Final Answer<br/>with Source Citations])
     
-    style Start fill:#e1f5ff
-    style End fill:#c8e6c9
-    style Decision fill:#fff9c4
-    style WebSearch fill:#ffe0b2
-    style Grade fill:#f8bbd0
-    style Rerank fill:#e1bee7
-```
+    %% Stiller
+    style Start fill:#4A90E2,stroke:#333,stroke-width:2px,color:#fff
+    style Retrieve fill:#E3F2FD,stroke:#4A90E2,stroke-width:2px
+    style Rerank fill:#BBDEFB,stroke:#4A90E2,stroke-width:2px
+    style Grade fill:#FFD54F,stroke:#FBC02D,stroke-width:2px
+    style Decision fill:#FFFFFF,stroke:#333,stroke-width:4px
+    style WebSearch fill:#FF7043,stroke:#E64A19,stroke-width:2px,color:#fff
+    style Generate fill:#66BB6A,stroke:#2E7D32,stroke-width:2px,color:#fff
+    style End fill:#2E7D32,stroke:#1B5E20,stroke-width:2px,color:#fff
 
 ## 🔧 System Components
 
