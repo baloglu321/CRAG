@@ -17,7 +17,7 @@ A sophisticated RAG (Retrieval-Augmented Generation) system that implements Corr
 - **Source Citation**: Automatically cites sources in the generated answers
 
 ## 📊 Architecture
-
+```mermaid
 graph TB
     Start([User Query]) --> Retrieve[Retrieve Documents<br/>Hybrid: BM25 + Vector<br/>Top 20 Candidates]
     Retrieve --> Rerank[Cross-Encoder Reranking<br/>cross-encoder/ms-marco-TinyBERT<br/>Top 5 from Top 20]
@@ -40,6 +40,7 @@ graph TB
     style WebSearch fill:#FF7043,stroke:#E64A19,stroke-width:2px,color:#fff
     style Generate fill:#66BB6A,stroke:#2E7D32,stroke-width:2px,color:#fff
     style End fill:#2E7D32,stroke:#1B5E20,stroke-width:2px,color:#fff
+```
 
 ## 🔧 System Components
 
