@@ -42,6 +42,7 @@ class GraphState(TypedDict):
     generation: str
     web_search: str  # "Yes" veya "No"
     documents: List[Document]
+    loop_step: int
 
 
 def get_hybrid_reranked_docs(ensemble_retriever, query):
@@ -84,35 +85,51 @@ def retrieve_node(state, my_retriever):
     return {"documents": documents, "question": question}
 
 
-def grade_documents_node(state):
-    """
-    DOKÜMANLARI PUANLAR VE FİLTRELER
-    """
-
-    print("---GRADE DOCUMENTS---")
+def generate_node(state):
+    print("---GENERATE---")
     question = state["question"]
     documents = state["documents"]
 
-    filtered_docs = []
-    web_search = "No"
+    # Döngü sayacı (Loop Step)
+    loop_step = state.get("loop_step", 0)
+    loop_step += 1
 
+    llm = ChatOllama(
+        model=OLLAMA_MAIN_MODEL, base_url=CLOUDFLARE_TUNNEL_URL, temperature=0
+    )
+
+    # --- DEĞİŞİKLİK BURADA: Kaynak Formatlama Mantığı ---
+    context_list = []
     for d in documents:
-        score = grader_chain.invoke({"question": question, "document": d.page_content})
-        grade = score.binary_score
+        raw_source = d.metadata.get("source", "Unknown")
 
-        if grade == "yes":
-            print("  - Belge onaylandı.")
-            filtered_docs.append(d)
+        # 1. Kaynak bir URL mi yoksa Dosya mı kontrol et
+        if raw_source.startswith("http") or raw_source.startswith("www"):
+            # Web linki ise olduğu gibi kullan (Kesme yapma)
+            display_source = raw_source
         else:
-            print("  - Belge reddedildi (Alakasız).")
-            continue
+            # Dosya yolu ise sadece ismini al (örn: /data/test.json -> test.json)
+            display_source = os.path.basename(raw_source)
 
-    # Eğer elimizde hiç belge kalmadıysa Web Araması bayrağını kaldır
-    if not filtered_docs:
-        print("  - !!! HİÇ BELGE KALMADI -> WEB ARAMASI GEREKİYOR !!!")
-        web_search = "Yes"
+        formatted_chunk = f"[Source: {display_source}]\n{d.page_content}"
+        context_list.append(formatted_chunk)
 
-    return {"documents": filtered_docs, "web_search": web_search}
+    context_str = "\n\n---\n\n".join(context_list)
+    # ----------------------------------------------------
+
+    template = """You are an expert assistant. Answer the question using ONLY the provided context. 
+    Important: Always cite the source using the format [Source: url_or_filename].
+    If the context contains a URL source, use the full link.
+    
+    Context: {context}
+    Question: {question}
+    Answer:"""
+
+    prompt = ChatPromptTemplate.from_template(template)
+    chain = prompt | llm | StrOutputParser()
+    generation = chain.invoke({"context": context_str, "question": question})
+
+    return {"generation": generation, "documents": documents, "loop_step": loop_step}
 
 
 def web_search_node(state):
@@ -145,6 +162,10 @@ def generate_node(state):
     print("---GENERATE---")
     question = state["question"]
     documents = state["documents"]
+
+    # Döngü Sayacı (Loop Step)
+    loop_step = state.get("loop_step", 0)
+    loop_step += 1
 
     llm = ChatOllama(
         model=OLLAMA_MAIN_MODEL, base_url=CLOUDFLARE_TUNNEL_URL, temperature=0
@@ -182,7 +203,7 @@ def generate_node(state):
     chain = prompt | llm | StrOutputParser()
     generation = chain.invoke({"context": context_str, "question": question})
 
-    return {"generation": generation, "documents": documents}
+    return {"generation": generation, "documents": documents, "loop_step": loop_step}
 
 
 def decide_to_generate(state):
@@ -200,11 +221,137 @@ def decide_to_generate(state):
 # GRAFİĞİ KURMA VE ÇALIŞTIRMA (APP)
 # ==========================================
 
+
 # Grafiği bir fonksiyon içinde değil, global olarak bir kere tanımla
+# --- 1. HALLUCINATION GRADER (Cevap belgelere dayanıyor mu?) ---
+class GradeHallucinations(BaseModel):
+    """Binary score for hallucination check in generation documents."""
+
+    binary_score: str = Field(
+        description="Answer is grounded in the facts, 'yes' or 'no'"
+    )
+
+
+def get_hallucination_grader():
+    llm = ChatOllama(
+        model=OLLAMA_MAIN_MODEL, base_url=CLOUDFLARE_TUNNEL_URL, temperature=0
+    )
+    structured_llm_grader = llm.with_structured_output(GradeHallucinations)
+
+    system_prompt = """You are a grader assessing if an answer is supported by facts.
+                        The answer often uses citations like [Source: url]. 
+                        If the answer is loosely supported by the provided documents, grade it as 'yes'.
+                        Do not be too strict. Give 'yes' or 'no'."""
+
+    hallucination_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            (
+                "human",
+                "Set of facts: \n\n {documents} \n\n LLM generation: {generation}",
+            ),
+        ]
+    )
+
+    return hallucination_prompt | structured_llm_grader
+
+
+# --- 2. ANSWER GRADER (Cevap soruyu çözüyor mu?) ---
+def get_answer_grader():
+    # Model tanımı aynı kalsın...
+    llm = ChatOllama(
+        model=OLLAMA_MAIN_MODEL, base_url=CLOUDFLARE_TUNNEL_URL, temperature=0
+    )
+
+    class GradeAnswer(BaseModel):
+        binary_score: str = Field(description="'yes' or 'no'")
+
+    structured_llm_grader = llm.with_structured_output(GradeAnswer)
+
+    # --- DEĞİŞİKLİK BURADA: Prompt yumuşatıldı ---
+    system_prompt = """You are a helper evaluating an answer.
+    Does the answer provide ANY useful information related to the question?
+    Even if it is a partial answer or explains why the info is missing, grade it as 'yes'.
+    Only grade 'no' if the answer is completely off-topic (e.g. talking about cooking when asked about sports)."""
+
+    grade_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            ("human", "Question: \n\n {question} \n\n Answer: {generation}"),
+        ]
+    )
+    return grade_prompt | structured_llm_grader
+
+
+def get_doc_grader():
+    # Burada da ana modeli (Gemma) kullanıyoruz
+    llm = ChatOllama(
+        model=OLLAMA_MAIN_MODEL, base_url=CLOUDFLARE_TUNNEL_URL, temperature=0
+    )
+
+    class GradeDocuments(BaseModel):
+        """Binary score for relevance check on retrieved documents."""
+
+        binary_score: str = Field(
+            description="Documents are relevant if they contain keyword(s) or semantic meaning useful to answer the question. 'yes' if relevant, 'no' if not."
+        )
+
+    structured_llm_grader = llm.with_structured_output(GradeDocuments)
+
+    system_prompt = """You are a grader assessing relevance of a retrieved document to a user question. 
+    If the document contains keyword(s) or semantic meaning useful to answer the question, grade it as 'yes'. 
+    Give a binary score 'yes' or 'no'."""
+
+    grade_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            ("human", "User Question: {question}\n\nRetrieved Document: {document}"),
+        ]
+    )
+
+    return grade_prompt | structured_llm_grader
+
+
+def grade_documents_node(state):
+    """
+    Çekilen dokümanların soruyla alakalı olup olmadığını kontrol eder.
+    Hepsi alakasızsa 'web_search' bayrağını açar.
+    """
+    print("---GRADE DOCUMENTS (CRAG)---")
+    question = state["question"]
+    documents = state["documents"]
+
+    # Puanlayıcı model zincirini getir
+    grader_chain = get_doc_grader()
+
+    filtered_docs = []
+    web_search = "No"
+
+    for d in documents:
+        # Her bir dokümanı kontrol et
+        score = grader_chain.invoke({"question": question, "document": d.page_content})
+        grade = score.binary_score
+
+        if grade == "yes":
+            print("  - Belge onaylandı.")
+            filtered_docs.append(d)
+        else:
+            print("  - Belge reddedildi (Alakasız).")
+            continue
+
+    # Eğer elimizde hiç onaylı belge kalmadıysa Web Search ZORUNLU olur
+    if not filtered_docs:
+        print("  - !!! HİÇ BELGE KALMADI -> WEB ARAMASI GEREKİYOR !!!")
+        web_search = "Yes"
+
+    return {"documents": filtered_docs, "web_search": web_search}
+
 
 # ==========================================
 # 2. AYARLAR VE MODELLER (LLM & GRADER)
 # ==========================================
+
+
 llm = ChatOllama(
     model=OLLAMA_FAST_MODEL,
     base_url=CLOUDFLARE_TUNNEL_URL,
@@ -245,29 +392,100 @@ grade_prompt = ChatPromptTemplate.from_messages(
 grader_chain = grade_prompt | structured_llm_grader
 
 
+def check_hallucinations_and_answer(state):
+    print("---SELF-REFLECTION---")
+    generation = state["generation"]
+    web_search_active = state.get("web_search", "No")
+
+    # Döngü Sigortası (Burası güvenlik kilidi)
+    loop_step = state.get("loop_step", 0)
+    if loop_step > 2:
+        print(f"  - ⚠️ MAKSİMUM DÖNGÜ ({loop_step}). Zorla kabul ediliyor. ✅")
+        return "useful"
+
+    # --- YENİ EKLENEN KISIM: "BİLMİYORUM" KONTROLÜ ---
+    # Modelin olumsuz cevaplarını yakalayacak anahtar kelimeler
+    refusal_phrases = [
+        "does not contain",
+        "cannot answer",
+        "no information",
+        "not mention",
+        "sorry",
+        "context does not",
+        "provided documents",
+    ]
+
+    # Cevabın içinde bu kelimelerden biri geçiyor mu? (Büyük/küçük harf duyarsız)
+    is_refusal = any(phrase in generation.lower() for phrase in refusal_phrases)
+
+    # 1. KONTROL: Kaynak Var mı VEYA "Bilmiyorum" diyor mu?
+    if "[Source:" in generation or is_refusal:
+        if is_refusal:
+            print("  - Grounded: ✅ (Model bilgi olmadığını dürüstçe belirtti)")
+        else:
+            print("  - Grounded: ✅ (Kaynak atıfı var)")
+
+        # Eğer Web araması yapıldıysa veya model "bilmiyorum" diyorsa direkt bitir
+        if web_search_active == "Yes" or is_refusal:
+            print("  - Sonuç kabul edildi. ✅")
+            return "useful"
+
+        # Sadece veritabanından geldiyse ve cevap verildiyse Alaka kontrolü yap
+        answer_grader = get_answer_grader()
+        score = answer_grader.invoke(
+            {"question": state["question"], "generation": generation}
+        )
+
+        if score.binary_score == "yes":
+            print("  - Relevant: ✅")
+            return "useful"
+        else:
+            print("  - Relevant: ❌ (Soruyla alakasız -> Web'e git)")
+            return "not_useful"
+
+    else:
+        print("  - Grounded: ❌ (Kaynak yok ve ret cümlesi yok -> Tekrar Dene)")
+        return "not_supported"
+
+
 ensemble_retriever = update_db_with_feedback(
     "./database/",
     client=chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT),
     collection_name="rag_test_data",
 )
 workflow = StateGraph(GraphState)
-retrieve_node_with_param = partial(retrieve_node, my_retriever=ensemble_retriever)
-workflow.add_node("retrieve", retrieve_node_with_param)
+
+# Node'lar
+workflow.add_node("retrieve", partial(retrieve_node, my_retriever=ensemble_retriever))
 workflow.add_node("grade_documents", grade_documents_node)
 workflow.add_node("web_search_node", web_search_node)
 workflow.add_node("generate", generate_node)
 
+# Akış
 workflow.set_entry_point("retrieve")
 workflow.add_edge("retrieve", "grade_documents")
+
+# CRAG Kararı
 workflow.add_conditional_edges(
     "grade_documents",
     decide_to_generate,
     {"web_search_node": "web_search_node", "generate": "generate"},
 )
-workflow.add_edge("web_search_node", "generate")
-workflow.add_edge("generate", END)
 
-# Uygulamayı derle
+# Web Search -> Generate
+workflow.add_edge("web_search_node", "generate")
+
+# SELF-RAG Kararı (Generate Sonrası)
+workflow.add_conditional_edges(
+    "generate",
+    check_hallucinations_and_answer,
+    {
+        "useful": END,  # Her şey mükemmel
+        "not_useful": "web_search_node",  # Cevap güvenli ama soruyu çözmedi -> Ara
+        "not_supported": "generate",  # Cevap uydurma -> Tekrar yaz (Loop)
+    },
+)
+
 app = workflow.compile()
 
 
@@ -277,7 +495,7 @@ def save_graph_image():
         graph_image = app.get_graph().draw_mermaid_png()
 
         # Dosyayı diske yazar
-        with open("workflow_crag_graph.png", "wb") as f:
+        with open("workflow_crag_self_graph.png", "wb") as f:
             f.write(graph_image)
 
         print("✅ Grafik başarıyla 'workflow_graph.png' olarak kaydedildi!")
@@ -315,7 +533,6 @@ if __name__ == "__main__":
     test_reranked_rag_query(
         user_query="Kathmandu established its first international relationship with Eugene, Oregon in 1975; however, who is the current mayor of Eugene, Oregon today?",
     )
-
     print("\n--- TEST 1: False Detail Comparison (Normans vs Eugene) ---")
     test_reranked_rag_query(
         user_query="Normanların yerel halkın dilini benimsemesi süreci ile Kathmandu'nun kardeş şehri olan Eugene, Oregon'daki yerel halkın Fransızcayı benimsemesi süreci arasındaki temel benzerlik nedir?",

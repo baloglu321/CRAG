@@ -19,7 +19,6 @@ MAX_BATCH_SIZE = 5000
 
 
 def db_update():
-
     # 4. ChromaDB İstemcisi Oluşturma ve Bağlanma
     client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
     print(f"Eski koleksiyon ({COLLECTION_NAME}) siliniyor...")
