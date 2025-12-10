@@ -302,8 +302,8 @@ of designing an aesthetically pleasing logo [Source: dev-v1.1.json].
 | **Correct Answers** | 4/6 (66%) | 6/6 (100%) |
 | **False Premise Detection** | 0/2 (0%) | 2/2 (100%) |
 | **Citation Quality** | Good (sometimes redundant) | Excellent (concise) |
-| **Models Used** | 2 (llama3.2:3b + gemma3:27b) | 1 (gemma3:27b only) |
-| **Memory Usage** | Lower (dual-model) | Higher (single large model) |
+| **Models Used** | 2 (llama3.2:3b + gemma3:27b) |2 (llama3.2:3b + gemma3:27b) |
+| **Memory Usage** | Same (dual-model) |  Same (dual-model) |
 | **Best For** | High-throughput, clear questions | Quality-critical, adversarial queries |
 
 ## 💡 When to Use Each System
@@ -451,40 +451,6 @@ is_refusal = any(phrase in generation.lower() for phrase in refusal_phrases)
 └── README.md
 ```
 
-## 🔮 Future Improvements
-
-- [ ] Add streaming responses for better UX
-- [ ] Implement caching for frequently asked questions
-- [ ] Add query rewriting/expansion for better retrieval
-- [ ] Implement multi-query retrieval
-- [ ] Add confidence scoring for answers
-- [ ] Optimize reranking batch size
-- [ ] Add support for PDF and other document formats
-- [ ] Implement conversation memory for follow-up questions
-- [ ] Add model switching based on query complexity
-- [ ] Implement async processing for parallel operations
-- [ ] Add monitoring and logging dashboard
-- [ ] A/B testing framework for comparing systems
-- [ ] Adaptive Self-RAG (trigger only on high-uncertainty queries)
-
-## ⚙️ Performance Optimization Tips
-
-1. **Model Selection**: Adjust model sizes based on your hardware
-   - Grading: Can use even smaller models (1B-3B params)
-   - Generation: Can use larger models if available (70B+ params)
-
-2. **Retrieval Tuning**:
-   - Adjust `TOP_K_RETRIEVAL` and `TOP_K_RERANK` based on your use case
-   - Higher values = better recall but slower performance
-
-3. **Batch Processing**:
-   - Process multiple queries in parallel if needed
-   - Consider implementing query queue system
-
-4. **Self-RAG Optimization**:
-   - Use loop_step protection to prevent infinite regeneration
-   - Adjust refusal_phrases based on your model's behavior
-   - Consider making Self-RAG optional based on query complexity
 
 
 ---
